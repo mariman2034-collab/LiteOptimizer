@@ -1,7 +1,8 @@
 Clear-Host
 
 $logo = @"
-██╗     ██╗████████╗███████╗     ██████╗ ██████╗ ████████╗██╗███╗   ███╗██╗███████╗███████╗██████╗ 
+██╗     ██╗████████╗███████╗     ██████╗ ██████╗ ████████╗██╗███╗   ███╗██╗███████╗███████╗██████╗ git status
+
 ██║     ██║╚══██╔══╝██╔════╝    ██╔═══██╗██╔══██╗╚══██╔══╝██║████╗ ████║██║╚══███╔╝██╔════╝██╔══██╗
 ██║     ██║   ██║   █████╗      ██║   ██║██████╔╝   ██║   ██║██╔████╔██║██║  ███╔╝ █████╗  ██████╔╝
 ██║     ██║   ██║   ██╔══╝      ██║   ██║██╔═══╝    ██║   ██║██║╚██╔╝██║██║ ███╔╝  ██╔══╝  ██╔══██╗
@@ -21,9 +22,7 @@ Start-Sleep -Seconds 1
 # - Real rollback for Registry + Services
 # - Debloat section (NOT reliably reversible)
 # - "Ultimate LiteOptimizer" power plan creation/activation
-#
-# LiteOptimizer v1.2 :)
-# Run as Admin recommended.
+# - Hone-style categorized tweaks with Risk labels
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -75,12 +74,6 @@ function Try-SetClipboard([string]$text) {
 }
 
 # -------------------- Rollback State --------------------
-# State format:
-# {
-#   registry: { "HKCU|Path|Name": { exists, type, data } },
-#   services: { "ServiceName": { startMode } },
-#   debloat:  { removedAppx: [], removedProvisioned: [] }
-# }
 function Load-State {
   if (Test-Path $StateFile) {
     try { return (Get-Content $StateFile -Raw | ConvertFrom-Json -Depth 10) } catch { }
@@ -98,13 +91,11 @@ function Save-State($state) {
 
 $STATE = Load-State
 
-function Reg-KeyString([string]$hive, [string]$path, [string]$name) {
-  return "$hive|$path|$name"
-}
+function Reg-KeyString([string]$hive, [string]$path, [string]$name) { "$hive|$path|$name" }
 
 function Capture-RegistryBefore([string]$hive, [string]$path, [string]$name) {
   $k = Reg-KeyString $hive $path $name
-  if ($STATE.registry.ContainsKey($k)) { return } # already captured
+  if ($STATE.registry.ContainsKey($k)) { return }
 
   $full = "$hive`:\$path"
   $exists = $false
@@ -157,7 +148,7 @@ function Capture-ServiceBefore([string]$serviceName) {
   if ($STATE.services.ContainsKey($serviceName)) { return }
   try {
     $cim = Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction Stop
-    $STATE.services[$serviceName] = [PSCustomObject]@{ startMode = $cim.StartMode } # Auto / Manual / Disabled
+    $STATE.services[$serviceName] = [PSCustomObject]@{ startMode = $cim.StartMode }
   } catch { }
 }
 
@@ -222,7 +213,6 @@ function Add-Or-Activate-LiteOptimizerPlan {
 
   powercfg /changename $newGuid $planName | Out-Null
   powercfg /setactive $newGuid | Out-Null
-
   Log "Created and activated power plan: $planName ($newGuid)"
 }
 
@@ -294,117 +284,411 @@ function Apply-DebloatAction($a) {
 
 # -------------------- Tweaks manifest --------------------
 $tweaks = @(
+  # Explorer basics
   @{
-    Id="show_file_ext"
-    Name="Show file extensions"
-    Category="Explorer"
-    Risk="Safe"
-    Actions=@(
-      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"; Name="HideFileExt"; Type="DWord"; Data=0 }
-    )
+    Id="show_file_ext"; Name="Show file extensions"; Category="Quality of Life"; Risk="Safe"
+    Actions=@(@{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"; Name="HideFileExt"; Type="DWord"; Data=0 })
   },
   @{
-    Id="show_hidden_files"
-    Name="Show hidden files"
-    Category="Explorer"
-    Risk="Safe"
-    Actions=@(
-      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"; Name="Hidden"; Type="DWord"; Data=1 }
-    )
+    Id="show_hidden_files"; Name="Show hidden files"; Category="Quality of Life"; Risk="Safe"
+    Actions=@(@{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"; Name="Hidden"; Type="DWord"; Data=1 })
   },
   @{
-    Id="disable_startup_delay"
-    Name="Disable startup delay"
-    Category="Performance"
-    Risk="Safe"
-    Actions=@(
-      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize"; Name="StartupDelayInMSec"; Type="DWord"; Data=0 }
-    )
+    Id="disable_startup_delay"; Name="Disable startup delay"; Category="FPS & Latency"; Risk="Safe"
+    Actions=@(@{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize"; Name="StartupDelayInMSec"; Type="DWord"; Data=0 })
+  },
+
+  # Privacy basics
+  @{
+    Id="disable_ads_id"; Name="Disable advertising ID"; Category="Privacy & Security"; Risk="Safe"
+    Actions=@(@{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo"; Name="Enabled"; Type="DWord"; Data=0 })
   },
   @{
-    Id="disable_ads_id"
-    Name="Disable advertising ID"
-    Category="Privacy"
-    Risk="Safe"
-    Actions=@(
-      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo"; Name="Enabled"; Type="DWord"; Data=0 }
-    )
+    Id="disable_tailored_experiences"; Name="Disable tailored experiences"; Category="Privacy & Security"; Risk="Safe"
+    Actions=@(@{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Privacy"; Name="TailoredExperiencesWithDiagnosticDataEnabled"; Type="DWord"; Data=0 })
   },
-  @{
-    Id="disable_tailored_experiences"
-    Name="Disable tailored experiences"
-    Category="Privacy"
-    Risk="Safe"
-    Actions=@(
-      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Privacy"; Name="TailoredExperiencesWithDiagnosticDataEnabled"; Type="DWord"; Data=0 }
-    )
-  },
+
+  # Power plan
   @{
     Id="powerplan_liteoptimizer_ultimate"
     Name="Power: Create & enable 'Ultimate LiteOptimizer' power plan"
-    Category="Power"
+    Category="FPS & Latency"
+    Risk="Safe"
+    Actions=@(@{ Kind="Command"; Command="Add-Or-Activate-LiteOptimizerPlan" })
+  },
+
+  # -------- Hone-style additions (from your screenshots) --------
+
+  # Show PC Boot Information (Verbose)
+  @{
+    Id="show_boot_info"
+    Name="Show PC Boot Information"
+    Category="Quality of Life"
+    Risk="Safe"
+    Actions=@(@{ Kind="Registry"; Hive="HKLM"; Path="SYSTEM\CurrentControlSet\Control"; Name="VerboseStatus"; Type="DWord"; Data=1 })
+  },
+
+  # Disable Transparency
+  @{
+    Id="disable_transparency"
+    Name="Disable Transparency"
+    Category="Quality of Life"
+    Risk="Safe"
+    Actions=@(@{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"; Name="EnableTransparency"; Type="DWord"; Data=0 })
+  },
+
+  # Explorer Compact Mode
+  @{
+    Id="explorer_compact"
+    Name="Enable Explorer Compact Mode"
+    Category="Quality of Life"
+    Risk="Safe"
+    Actions=@(@{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"; Name="UseCompactMode"; Type="DWord"; Data=1 })
+  },
+
+  # Remove "- Shortcut" suffix
+  @{
+    Id="remove_shortcut_suffix"
+    Name='Disable "- Shortcut" suffix when creating shortcuts'
+    Category="Quality of Life"
     Risk="Safe"
     Actions=@(
-      @{ Kind="Command"; Command="Add-Or-Activate-LiteOptimizerPlan" }
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer"; Name="link"; Type="Binary"; Data=([byte[]](0x00,0x00,0x00,0x00)) }
     )
   },
 
-  # Balanced examples
+  # Disable Sticky Keys prompt
   @{
-    Id="disable_xbox_gamebar"
-    Name="Disable Xbox Game Bar capture features"
-    Category="Gaming"
+    Id="disable_sticky_keys"
+    Name="Disable Sticky Keys"
+    Category="Quality of Life"
+    Risk="Safe"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKCU"; Path="Control Panel\Accessibility\StickyKeys"; Name="Flags"; Type="String"; Data="506" }
+    )
+  },
+
+  # Show all tray icons
+  @{
+    Id="show_all_tray_icons"
+    Name="Show All Taskbar Tray Icons"
+    Category="Quality of Life"
+    Risk="Safe"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer"; Name="EnableAutoTray"; Type="DWord"; Data=0 }
+    )
+  },
+
+  # Disable Focus Assist (quiet hours)
+  @{
+    Id="disable_focus_assist"
+    Name="Disable Windows Focus Assist"
+    Category="Quality of Life"
+    Risk="Medium"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Notifications\Settings"; Name="NOC_GLOBAL_SETTING_TOASTS_ENABLED"; Type="DWord"; Data=1 }
+    )
+  },
+
+  # Disable Notifications
+  @{
+    Id="disable_notifications"
+    Name="Disable Notifications"
+    Category="Quality of Life"
+    Risk="Medium"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\PushNotifications"; Name="ToastEnabled"; Type="DWord"; Data=0 }
+    )
+  },
+
+  # Classic right click menu (Windows 11)
+  @{
+    Id="win11_classic_context"
+    Name="Enable Classic Right Click Menu On Windows 11"
+    Category="Quality of Life"
+    Risk="Medium"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"; Name=""; Type="String"; Data="" }
+    )
+  },
+
+  # Disable Windows Game Bar
+  @{
+    Id="disable_gamebar"
+    Name="Disable Windows GameBar"
+    Category="FPS & Latency"
     Risk="Medium"
     Actions=@(
       @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\GameDVR"; Name="AppCaptureEnabled"; Type="DWord"; Data=0 },
       @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\GameBar"; Name="ShowStartupPanel"; Type="DWord"; Data=0 }
     )
   },
+
+  # Optimize mouse (disable acceleration)
   @{
-    Id="set_sysmain_manual"
-    Name="Service: Set SysMain to Manual"
-    Category="Services"
+    Id="optimize_mouse"
+    Name="Optimize Mouse (Disable Acceleration)"
+    Category="FPS & Latency"
     Risk="Medium"
     Actions=@(
-      @{ Kind="Service"; Name="SysMain"; StartupType="Manual" }
+      @{ Kind="Registry"; Hive="HKCU"; Path="Control Panel\Mouse"; Name="MouseSpeed"; Type="String"; Data="0" },
+      @{ Kind="Registry"; Hive="HKCU"; Path="Control Panel\Mouse"; Name="MouseThreshold1"; Type="String"; Data="0" },
+      @{ Kind="Registry"; Hive="HKCU"; Path="Control Panel\Mouse"; Name="MouseThreshold2"; Type="String"; Data="0" }
     )
   },
 
-  # Debloat (High)
+  # Disable Windows Search Indexer (service)
+  @{
+    Id="disable_search_indexer"
+    Name="Disable Windows Search Indexer"
+    Category="FPS & Latency"
+    Risk="High"
+    Actions=@(
+      @{ Kind="Service"; Name="WSearch"; StartupType="Disabled" }
+    )
+  },
+
+  # Optimize I/O Operations (safe-ish: enable large system cache OFF; avoid risky storage driver tweaks)
+  @{
+    Id="optimize_io_ops"
+    Name="Optimize I/O Operations"
+    Category="FPS & Latency"
+    Risk="Medium"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKLM"; Path="SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management"; Name="LargeSystemCache"; Type="DWord"; Data=0 }
+    )
+  },
+
+  # Optimize Drives (run built-in optimize)
+  @{
+    Id="optimize_drives"
+    Name="Optimize Drives"
+    Category="FPS & Latency"
+    Risk="Safe"
+    Actions=@(
+      @{ Kind="Command"; Command="Ensure-Admin; Optimize-Volume -DriveLetter (Get-Volume | Where-Object DriveLetter | Select-Object -ExpandProperty DriveLetter) -ReTrim -Defrag -SlabConsolidate -ErrorAction SilentlyContinue | Out-Null" }
+    )
+  },
+
+  # Optimize Windows Explorer (example: disable frequent/recent)
+  @{
+    Id="optimize_explorer"
+    Name="Optimize Windows Explorer"
+    Category="Quality of Life"
+    Risk="Safe"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer"; Name="ShowFrequent"; Type="DWord"; Data=0 },
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer"; Name="ShowRecent"; Type="DWord"; Data=0 }
+    )
+  },
+
+  # Disable "My People" (Windows 10 feature)
+  @{
+    Id="disable_my_people"
+    Name="Disable My People"
+    Category="Quality of Life"
+    Risk="Safe"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\People"; Name="PeopleBand"; Type="DWord"; Data=0 }
+    )
+  },
+
+  # Disable Web Search & Assistants (Start menu Bing search)
+  @{
+    Id="disable_web_search"
+    Name="Disable Web Search & Assistants"
+    Category="Privacy & Security"
+    Risk="Medium"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Search"; Name="BingSearchEnabled"; Type="DWord"; Data=0 },
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Search"; Name="CortanaConsent"; Type="DWord"; Data=0 }
+    )
+  },
+
+  # Disable Program Compatibility Assistant (PcaSvc)
+  @{
+    Id="disable_pca"
+    Name="Disable Windows Program Compatibility Assistant"
+    Category="Quality of Life"
+    Risk="High"
+    Actions=@(
+      @{ Kind="Service"; Name="PcaSvc"; StartupType="Disabled" }
+    )
+  },
+
+  # Disable Fax and Print (Print Spooler)
+  @{
+    Id="disable_fax_print"
+    Name="Disable Fax And Print"
+    Category="Quality of Life"
+    Risk="High"
+    Actions=@(
+      @{ Kind="Service"; Name="Spooler"; StartupType="Disabled" }
+    )
+  },
+
+  # Disable OneDrive (policy)
+  @{
+    Id="disable_onedrive"
+    Name="Disable OneDrive"
+    Category="FPS & Latency"
+    Risk="High"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKLM"; Path="SOFTWARE\Policies\Microsoft\Windows\OneDrive"; Name="DisableFileSyncNGSC"; Type="DWord"; Data=1 }
+    )
+  },
+
+  # Disable Live Tiles (Windows 10 legacy)
+  @{
+    Id="disable_live_tiles"
+    Name="Disable Live Tiles"
+    Category="Quality of Life"
+    Risk="Medium"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Policies\Microsoft\Windows\CurrentVersion\PushNotifications"; Name="NoTileApplicationNotification"; Type="DWord"; Data=1 }
+    )
+  },
+
+  # Disable Action Center (Windows 10)
+  @{
+    Id="disable_action_center"
+    Name="Disable Action Center"
+    Category="Quality of Life"
+    Risk="High"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Policies\Microsoft\Windows\Explorer"; Name="DisableNotificationCenter"; Type="DWord"; Data=1 }
+    )
+  },
+
+  # Disable Storage Sense
+  @{
+    Id="disable_storage_sense"
+    Name="Disable Storage Sense"
+    Category="Quality of Life"
+    Risk="Medium"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy"; Name="01"; Type="DWord"; Data=0 }
+    )
+  },
+
+  # Set Visual Effects for performance
+  @{
+    Id="visual_effects_perf"
+    Name="Set Visual Effects For performance"
+    Category="FPS & Latency"
+    Risk="Medium"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"; Name="VisualFXSetting"; Type="DWord"; Data=2 }
+    )
+  },
+
+  # Disable Windows Insider
+  @{
+    Id="disable_insider"
+    Name="Disable Windows Insider"
+    Category="Privacy & Security"
+    Risk="Medium"
+    Actions=@(
+      @{ Kind="Registry"; Hive="HKLM"; Path="SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"; Name="ManagePreviewBuilds"; Type="DWord"; Data=1 },
+      @{ Kind="Registry"; Hive="HKLM"; Path="SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"; Name="ManagePreviewBuildsPolicyValue"; Type="DWord"; Data=0 }
+    )
+  },
+
+  # Network congestion provider (CTCP)
+  @{
+    Id="net_congestion_ctcp"
+    Name="Optimize Network Congestion Provider (CTCP)"
+    Category="Network & Ping"
+    Risk="Medium"
+    Actions=@(
+      @{ Kind="Command"; Command='Ensure-Admin; netsh int tcp set global congestionprovider=ctcp | Out-Null' }
+    )
+  },
+
+  # Netsh network settings (conservative)
+  @{
+    Id="netsh_network_settings"
+    Name="Optimize Netsh Network Settings"
+    Category="Network & Ping"
+    Risk="Medium"
+    Actions=@(
+      @{ Kind="Command"; Command='Ensure-Admin; netsh int tcp set global autotuninglevel=normal | Out-Null' }
+    )
+  },
+
+  # SysMain to Manual (example)
+  @{
+    Id="set_sysmain_manual"
+    Name="Service: Set SysMain to Manual"
+    Category="FPS & Latency"
+    Risk="Medium"
+    Actions=@(@{ Kind="Service"; Name="SysMain"; StartupType="Manual" })
+  },
+
+  # Debloat
   @{
     Id="debloat_common_appx"
     Name="Debloat: Remove common preinstalled apps (Appx + Provisioned)"
-    Category="Debloat"
+    Category="Privacy & Security"
     Risk="High"
     Actions=@(
       @{ Kind="Debloat"; Mode="Both"; Packages=@(
-        "Microsoft.BingNews",
-        "Microsoft.BingWeather",
-        "Microsoft.GetHelp",
-        "Microsoft.Getstarted",
-        "Microsoft.MicrosoftOfficeHub",
-        "Microsoft.MicrosoftSolitaireCollection",
-        "Microsoft.MixedReality.Portal",
-        "Microsoft.People",
-        "Microsoft.SkypeApp",
-        "Microsoft.Todos",
-        "Microsoft.XboxApp",
-        "Microsoft.XboxGamingOverlay",
-        "Microsoft.XboxGameOverlay",
-        "Microsoft.XboxSpeechToTextOverlay",
-        "Microsoft.YourPhone",
-        "Microsoft.ZuneMusic",
-        "Microsoft.ZuneVideo"
+        "Microsoft.BingNews","Microsoft.BingWeather","Microsoft.GetHelp","Microsoft.Getstarted",
+        "Microsoft.MicrosoftOfficeHub","Microsoft.MicrosoftSolitaireCollection","Microsoft.MixedReality.Portal",
+        "Microsoft.People","Microsoft.SkypeApp","Microsoft.Todos","Microsoft.XboxApp","Microsoft.XboxGamingOverlay",
+        "Microsoft.XboxGameOverlay","Microsoft.XboxSpeechToTextOverlay","Microsoft.YourPhone",
+        "Microsoft.ZuneMusic","Microsoft.ZuneVideo"
       ) }
+    )
+  },
+
+  # HIGH RISK / SECURITY-REDUCING (included but not in profiles)
+  @{
+    Id="disable_mitigations"
+    Name="Disable Mitigations (SECURITY RISK)"
+    Category="Privacy & Security"
+    Risk="High"
+    Actions=@(
+      @{ Kind="Command"; Command='throw "This tweak is intentionally blocked by default. If you REALLY want it, remove this throw and implement your chosen mitigation changes safely."' }
+    )
+  },
+  @{
+    Id="disable_browser_updates"
+    Name="Disable Browser Updates (NOT RECOMMENDED)"
+    Category="Privacy & Security"
+    Risk="High"
+    Actions=@(
+      @{ Kind="Command"; Command='throw "Not recommended. Blocking by default. (Disabling browser updates is a security risk.)"' }
     )
   }
 )
 
 # -------------------- Profiles --------------------
 $profiles = @{
-  "Safe"      = @("show_file_ext","show_hidden_files","disable_startup_delay","disable_ads_id","disable_tailored_experiences","powerplan_liteoptimizer_ultimate")
-  "Balanced"  = @("show_file_ext","show_hidden_files","disable_startup_delay","disable_ads_id","disable_tailored_experiences","disable_xbox_gamebar","set_sysmain_manual","powerplan_liteoptimizer_ultimate")
-  "Aggressive"= @("show_file_ext","show_hidden_files","disable_startup_delay","disable_ads_id","disable_tailored_experiences","disable_xbox_gamebar","set_sysmain_manual","powerplan_liteoptimizer_ultimate","debloat_common_appx")
+  "Safe"      = @(
+    "show_file_ext","show_hidden_files","disable_startup_delay",
+    "disable_ads_id","disable_tailored_experiences",
+    "powerplan_liteoptimizer_ultimate",
+    "show_boot_info","disable_transparency","explorer_compact","optimize_explorer","disable_my_people"
+  )
+  "Balanced"  = @(
+    "show_file_ext","show_hidden_files","disable_startup_delay",
+    "disable_ads_id","disable_tailored_experiences",
+    "powerplan_liteoptimizer_ultimate",
+    "disable_gamebar","optimize_mouse","set_sysmain_manual",
+    "disable_web_search","visual_effects_perf",
+    "net_congestion_ctcp","netsh_network_settings"
+  )
+  "Aggressive"= @(
+    "show_file_ext","show_hidden_files","disable_startup_delay",
+    "disable_ads_id","disable_tailored_experiences",
+    "powerplan_liteoptimizer_ultimate",
+    "disable_gamebar","optimize_mouse","set_sysmain_manual",
+    "disable_web_search","visual_effects_perf",
+    "net_congestion_ctcp","netsh_network_settings",
+    "disable_search_indexer","disable_onedrive","disable_pca","disable_fax_print",
+    "debloat_common_appx"
+  )
 }
 
 # Selected IDs
@@ -456,7 +740,6 @@ function Print-Menu {
 
 function Get-SelectedTweaks { $tweaks | Where-Object { $selected.Contains($_.Id) } }
 
-# Generate runnable PS snippet for selected tweaks
 function Get-SelectedCommandLines {
   $sel = Get-SelectedTweaks
   $lines = @()
@@ -470,6 +753,10 @@ function Get-SelectedCommandLines {
           $val = '"' + ([string]$a.Data).Replace('"','`"') + '"'
         } elseif ($a.Type -eq "MultiString") {
           $val = '@("' + (($a.Data | ForEach-Object { ([string]$_).Replace('"','`"') }) -join '","') + '")'
+        } elseif ($a.Type -eq "Binary") {
+          # not perfect as a one-liner; still works for copy/paste as a PS array
+          $bytes = ($a.Data | ForEach-Object { "0x{0:X2}" -f $_ }) -join ","
+          $val = "[byte[]]@($bytes)"
         }
         $lines += "New-Item -Path `"$path`" -Force | Out-Null"
         $lines += "New-ItemProperty -Path `"$path`" -Name `"$($a.Name)`" -PropertyType $($a.Type) -Value $val -Force | Out-Null"
@@ -492,14 +779,11 @@ function Get-SelectedCommandLines {
   return $lines
 }
 
-function Build-PowerShellOneLiner([string[]]$lines) {
-  $joined = ($lines -join "; ")
-  return "& { $joined }"
-}
+function Build-PowerShellOneLiner([string[]]$lines) { "& { " + ($lines -join "; ") + " }" }
 
 function Build-CmdFromPs([string]$psOneLiner) {
   $escaped = $psOneLiner.Replace('"','""')
-  return 'powershell -NoProfile -ExecutionPolicy Bypass -Command "' + $escaped + '"'
+  'powershell -NoProfile -ExecutionPolicy Bypass -Command "' + $escaped + '"'
 }
 
 # -------------------- Profile + import/export --------------------
@@ -588,7 +872,7 @@ function Undo-Selected {
   Pause
 }
 
-# -------------------- Print commands (FIXED + copies to clipboard) --------------------
+# -------------------- Print commands (copies to clipboard) --------------------
 function Print-PowerShell {
   $sel = Get-SelectedTweaks
   if (-not $sel) { Write-Host "Nothing selected." -ForegroundColor Yellow; Start-Sleep 1; return }
