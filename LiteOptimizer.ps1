@@ -16,39 +16,13 @@ Start-Sleep -Seconds 1
 # Relaunch in a separate PowerShell window (keeps it "app-like")
 if (-not $env:LITEOPT_CHILD) {
   $env:LITEOPT_CHILD = "1"
-
-  # Re-download to ProgramData so we can run as a file (more reliable than iex in child)
-  $local = Join-Path $env:ProgramData "LiteOptimizer\LiteOptimizer.ps1"
-  New-Item -ItemType Directory -Path (Split-Path $local) -Force | Out-Null
-
-  try {
-    iwr -useb "https://raw.githubusercontent.com/mariman2034-collab/LiteOptimizer/master/LiteOptimizer.ps1" | Set-Content -Path $local -Encoding UTF8
-  } catch {
-    Write-Host "Download failed: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "Press Enter to exit..." -ForegroundColor Yellow
-    Read-Host | Out-Null
-    exit
-  }
-
   Start-Process powershell.exe -ArgumentList @(
     "-NoProfile",
     "-ExecutionPolicy","Bypass",
-    "-File", $local
+    "-Command", "& { iwr -useb 'https://raw.githubusercontent.com/mariman2034-collab/LiteOptimizer/master/LiteOptimizer.ps1' | iex }"
   ) -WindowStyle Normal
-
   exit
 }
-
-
-# LiteOptimizer.ps1
-# console menu with:
-# - Profiles (Safe/Balanced/Aggressive)
-# - Export/Import selection
-# - Real rollback for Registry + Services
-# - Debloat section (NOT reliably reversible)
-# - "Ultimate LiteOptimizer" power plan creation/activation
-# - Hone-style categorized tweaks with Risk labels
-# - Game performance presets (Lite / Power) + Revert
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -117,8 +91,6 @@ function Save-State($state) {
 }
 
 $STATE = Load-State
-
-# Back-compat for older state files
 if (-not $STATE.PSObject.Properties.Match("games")) {
   $STATE | Add-Member -NotePropertyName games -NotePropertyValue ([PSCustomObject]@{ lastPreset=""; lastPresetIds=@() }) -Force
 }
@@ -318,7 +290,6 @@ function Apply-DebloatAction($a) {
 
 # -------------------- Tweaks manifest --------------------
 $tweaks = @(
-  # Explorer basics
   @{
     Id="show_file_ext"; Name="Show file extensions"; Category="Quality of Life"; Risk="Safe"
     Actions=@(@{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"; Name="HideFileExt"; Type="DWord"; Data=0 })
@@ -331,8 +302,6 @@ $tweaks = @(
     Id="disable_startup_delay"; Name="Disable startup delay"; Category="FPS & Latency"; Risk="Safe"
     Actions=@(@{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize"; Name="StartupDelayInMSec"; Type="DWord"; Data=0 })
   },
-
-  # Privacy basics
   @{
     Id="disable_ads_id"; Name="Disable advertising ID"; Category="Privacy & Security"; Risk="Safe"
     Actions=@(@{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo"; Name="Enabled"; Type="DWord"; Data=0 })
@@ -341,8 +310,6 @@ $tweaks = @(
     Id="disable_tailored_experiences"; Name="Disable tailored experiences"; Category="Privacy & Security"; Risk="Safe"
     Actions=@(@{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Privacy"; Name="TailoredExperiencesWithDiagnosticDataEnabled"; Type="DWord"; Data=0 })
   },
-
-  # Power plan
   @{
     Id="powerplan_liteoptimizer_ultimate"
     Name="Power: Create & enable 'Ultimate LiteOptimizer' power plan"
@@ -351,7 +318,6 @@ $tweaks = @(
     Actions=@(@{ Kind="Command"; Command="Add-Or-Activate-LiteOptimizerPlan" })
   },
 
-  # -------- Hone-style additions --------
   @{
     Id="show_boot_info"
     Name="Show PC Boot Information"
@@ -401,15 +367,6 @@ $tweaks = @(
     )
   },
   @{
-    Id="disable_focus_assist"
-    Name="Disable Windows Focus Assist"
-    Category="Quality of Life"
-    Risk="Medium"
-    Actions=@(
-      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Notifications\Settings"; Name="NOC_GLOBAL_SETTING_TOASTS_ENABLED"; Type="DWord"; Data=1 }
-    )
-  },
-  @{
     Id="disable_notifications"
     Name="Disable Notifications"
     Category="Quality of Life"
@@ -433,7 +390,7 @@ $tweaks = @(
     Category="FPS & Latency"
     Risk="Medium"
     Actions=@(
-      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\GameDVR"; Name="AppCaptureEnabled"; Type="DWord"; Data=0 },
+      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentControlSet\Control\GameDVR"; Name="AppCaptureEnabled"; Type="DWord"; Data=0 },
       @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\GameBar"; Name="ShowStartupPanel"; Type="DWord"; Data=0 }
     )
   },
@@ -466,15 +423,18 @@ $tweaks = @(
       @{ Kind="Registry"; Hive="HKLM"; Path="SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management"; Name="LargeSystemCache"; Type="DWord"; Data=0 }
     )
   },
+
+  # ✅ FIXED Optimize Drives (NO $_ used; works with StrictMode)
   @{
     Id="optimize_drives"
     Name="Optimize Drives"
     Category="FPS & Latency"
     Risk="Safe"
     Actions=@(
-      @{ Kind="Command"; Command="Ensure-Admin; Get-Volume | Where-Object DriveLetter | ForEach-Object { try { Optimize-Volume -DriveLetter $_.DriveLetter -ReTrim -Defrag -SlabConsolidate -ErrorAction SilentlyContinue | Out-Null } catch {} }" }
+      @{ Kind="Command"; Command='Ensure-Admin; $letters = (Get-Volume | Where-Object DriveLetter | Select-Object -ExpandProperty DriveLetter); foreach($d in $letters){ try { Optimize-Volume -DriveLetter $d -ReTrim -Defrag -SlabConsolidate -ErrorAction SilentlyContinue | Out-Null } catch {} }' }
     )
   },
+
   @{
     Id="optimize_explorer"
     Name="Optimize Windows Explorer"
@@ -532,49 +492,12 @@ $tweaks = @(
     )
   },
   @{
-    Id="disable_live_tiles"
-    Name="Disable Live Tiles"
-    Category="Quality of Life"
-    Risk="Medium"
-    Actions=@(
-      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Policies\Microsoft\Windows\CurrentVersion\PushNotifications"; Name="NoTileApplicationNotification"; Type="DWord"; Data=1 }
-    )
-  },
-  @{
-    Id="disable_action_center"
-    Name="Disable Action Center"
-    Category="Quality of Life"
-    Risk="High"
-    Actions=@(
-      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Policies\Microsoft\Windows\Explorer"; Name="DisableNotificationCenter"; Type="DWord"; Data=1 }
-    )
-  },
-  @{
-    Id="disable_storage_sense"
-    Name="Disable Storage Sense"
-    Category="Quality of Life"
-    Risk="Medium"
-    Actions=@(
-      @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy"; Name="01"; Type="DWord"; Data=0 }
-    )
-  },
-  @{
     Id="visual_effects_perf"
     Name="Set Visual Effects For performance"
     Category="FPS & Latency"
     Risk="Medium"
     Actions=@(
       @{ Kind="Registry"; Hive="HKCU"; Path="Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"; Name="VisualFXSetting"; Type="DWord"; Data=2 }
-    )
-  },
-  @{
-    Id="disable_insider"
-    Name="Disable Windows Insider"
-    Category="Privacy & Security"
-    Risk="Medium"
-    Actions=@(
-      @{ Kind="Registry"; Hive="HKLM"; Path="SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"; Name="ManagePreviewBuilds"; Type="DWord"; Data=1 },
-      @{ Kind="Registry"; Hive="HKLM"; Path="SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"; Name="ManagePreviewBuildsPolicyValue"; Type="DWord"; Data=0 }
     )
   },
   @{
@@ -603,7 +526,7 @@ $tweaks = @(
     Actions=@(@{ Kind="Service"; Name="SysMain"; StartupType="Manual" })
   },
 
-  # -------- Games (Windows-side, not game-file edits) --------
+  # Games
   @{
     Id="game_mode_on"
     Name="Games: Enable Windows Game Mode"
@@ -639,26 +562,6 @@ $tweaks = @(
         "Microsoft.ZuneMusic","Microsoft.ZuneVideo"
       ) }
     )
-  },
-
-  # HIGH RISK / SECURITY-REDUCING (blocked)
-  @{
-    Id="disable_mitigations"
-    Name="Disable Mitigations (SECURITY RISK)"
-    Category="Privacy & Security"
-    Risk="High"
-    Actions=@(
-      @{ Kind="Command"; Command='throw "This tweak is intentionally blocked by default. If you REALLY want it, remove this throw and implement your chosen mitigation changes safely."' }
-    )
-  },
-  @{
-    Id="disable_browser_updates"
-    Name="Disable Browser Updates (NOT RECOMMENDED)"
-    Category="Privacy & Security"
-    Risk="High"
-    Actions=@(
-      @{ Kind="Command"; Command='throw "Not recommended. Blocking by default. (Disabling browser updates is a security risk.)"' }
-    )
   }
 )
 
@@ -692,7 +595,7 @@ $profiles = @{
   )
 }
 
-# Game Performance Presets
+# Game Presets
 $gamePresets = @{
   "Lite"  = @(
     "powerplan_liteoptimizer_ultimate",
@@ -728,7 +631,6 @@ $gamePresets = @{
   )
 }
 
-# Selected IDs
 $selected = New-Object System.Collections.Generic.HashSet[string]
 
 # -------------------- UI helpers --------------------
@@ -763,9 +665,8 @@ function Print-Menu {
   Write-Host "Commands:" -ForegroundColor Yellow
   Write-Host "  t <num>   Toggle"
   Write-Host "  ps/pb/pa  Profile: Safe / Balanced / Aggressive"
-  Write-Host "  gl/gp     Games Preset: Lite / Power (selects a bunch)"
-  Write-Host "  gr        Games Revert (undo last applied preset where supported)"
-  Write-Host "  a         Apply selected (saves rollback for registry/services)"
+  Write-Host "  gl/gp     Games Preset: Lite / Power"
+  Write-Host "  a         Apply selected"
   Write-Host "  undo      Undo selected (registry/services only; debloat not reversible)"
   Write-Host "  p         Print + COPY PowerShell command"
   Write-Host "  c         Print + COPY CMD command"
@@ -779,52 +680,6 @@ function Print-Menu {
 
 function Get-SelectedTweaks { $tweaks | Where-Object { $selected.Contains($_.Id) } }
 
-function Get-SelectedCommandLines {
-  $sel = Get-SelectedTweaks
-  $lines = @()
-
-  foreach ($t in $sel) {
-    foreach ($a in $t.Actions) {
-      if ($a.Kind -eq "Registry") {
-        $path = "{0}:\{1}" -f $a.Hive, $a.Path
-        $val = $a.Data
-        if ($a.Type -in @("String","ExpandString")) {
-          $val = '"' + ([string]$a.Data).Replace('"','`"') + '"'
-        } elseif ($a.Type -eq "MultiString") {
-          $val = '@("' + (($a.Data | ForEach-Object { ([string]$_).Replace('"','`"') }) -join '","') + '")'
-        } elseif ($a.Type -eq "Binary") {
-          $bytes = ($a.Data | ForEach-Object { "0x{0:X2}" -f $_ }) -join ","
-          $val = "[byte[]]@($bytes)"
-        }
-        $lines += "New-Item -Path `"$path`" -Force | Out-Null"
-        $lines += "New-ItemProperty -Path `"$path`" -Name `"$($a.Name)`" -PropertyType $($a.Type) -Value $val -Force | Out-Null"
-      }
-      elseif ($a.Kind -eq "Service") {
-        $lines += "Set-Service -Name `"$($a.Name)`" -StartupType $($a.StartupType)"
-      }
-      elseif ($a.Kind -eq "Command") {
-        $lines += $a.Command
-      }
-      elseif ($a.Kind -eq "Debloat") {
-        $pkgList = ($a.Packages | ForEach-Object { '"' + $_ + '"' }) -join ","
-        $lines += ('$pkgs=@({0}); foreach($p in $pkgs){{' -f $pkgList)
-        $lines += '  Get-AppxPackage -Name $p -AllUsers | ForEach-Object { try { Remove-AppxPackage -Package $_.PackageFullName -ErrorAction SilentlyContinue } catch {} }'
-        $lines += ('  if("{0}" -ne "Appx"){{ try {{ $prov = Get-AppxProvisionedPackage -Online | Where-Object {{ $_.DisplayName -eq $p }}; if($prov){{ Remove-AppxProvisionedPackage -Online -PackageName $prov.PackageName -ErrorAction SilentlyContinue | Out-Null }} }} catch {{}} }}' -f $a.Mode)
-        $lines += '}'
-      }
-    }
-  }
-  return $lines
-}
-
-function Build-PowerShellOneLiner([string[]]$lines) { "& { " + ($lines -join "; ") + " }" }
-
-function Build-CmdFromPs([string]$psOneLiner) {
-  $escaped = $psOneLiner.Replace('"','""')
-  'powershell -NoProfile -ExecutionPolicy Bypass -Command "' + $escaped + '"'
-}
-
-# -------------------- Profile + import/export --------------------
 function Select-Profile([string]$name) {
   $selected.Clear() | Out-Null
   foreach ($id in $profiles[$name]) { $selected.Add($id) | Out-Null }
@@ -836,47 +691,6 @@ function Select-GamesPreset([ValidateSet("Lite","Power")]$mode) {
   $STATE.games.lastPreset = $mode
   $STATE.games.lastPresetIds = @($gamePresets[$mode])
   Save-State $STATE
-}
-
-function Revert-LastGamesPreset {
-  Ensure-Admin
-  if (-not $STATE.games.lastPresetIds -or $STATE.games.lastPresetIds.Count -eq 0) {
-    Write-Host "No previous Games preset found in state." -ForegroundColor Yellow
-    Start-Sleep 1
-    return
-  }
-
-  $selected.Clear() | Out-Null
-  foreach ($id in $STATE.games.lastPresetIds) { $selected.Add([string]$id) | Out-Null }
-
-  Write-Host "Reverting Games preset: $($STATE.games.lastPreset)" -ForegroundColor Cyan
-  Undo-Selected
-
-  # keep history; user might want to re-revert
-}
-
-function Export-Selection {
-  $obj = [PSCustomObject]@{ selected = @($selected) }
-  ($obj | ConvertTo-Json -Depth 4) | Set-Content -Path $SelFile -Encoding UTF8
-  Write-Host "Exported selection to $SelFile" -ForegroundColor Green
-  Start-Sleep 1
-}
-
-function Import-Selection {
-  if (-not (Test-Path $SelFile)) {
-    Write-Host "No selection file at $SelFile" -ForegroundColor Yellow
-    Start-Sleep 1
-    return
-  }
-  try {
-    $obj = Get-Content $SelFile -Raw | ConvertFrom-Json
-    $selected.Clear() | Out-Null
-    foreach ($id in $obj.selected) { $selected.Add([string]$id) | Out-Null }
-    Write-Host "Imported selection from $SelFile" -ForegroundColor Green
-  } catch {
-    Write-Host "Failed to import selection (bad JSON)." -ForegroundColor Red
-  }
-  Start-Sleep 1
 }
 
 # -------------------- Apply / Undo --------------------
@@ -906,9 +720,6 @@ function Apply-Selected {
   }
 
   Write-Host "`nDone. Some changes may need restart/logoff." -ForegroundColor Green
-  if ($STATE.debloat.removedAppx.Count -gt 0 -or $STATE.debloat.removedProvisioned.Count -gt 0) {
-    Write-Host "Debloat note: removals are logged, but Undo cannot reliably reinstall Store apps." -ForegroundColor Yellow
-  }
   Pause
 }
 
@@ -935,39 +746,59 @@ function Undo-Selected {
   Pause
 }
 
-# -------------------- Print commands (copies to clipboard) --------------------
+function Export-Selection {
+  $obj = [PSCustomObject]@{ selected = @($selected) }
+  ($obj | ConvertTo-Json -Depth 4) | Set-Content -Path $SelFile -Encoding UTF8
+  Write-Host "Exported selection to $SelFile" -ForegroundColor Green
+  Start-Sleep 1
+}
+
+function Import-Selection {
+  if (-not (Test-Path $SelFile)) {
+    Write-Host "No selection file at $SelFile" -ForegroundColor Yellow
+    Start-Sleep 1
+    return
+  }
+  try {
+    $obj = Get-Content $SelFile -Raw | ConvertFrom-Json
+    $selected.Clear() | Out-Null
+    foreach ($id in $obj.selected) { $selected.Add([string]$id) | Out-Null }
+    Write-Host "Imported selection from $SelFile" -ForegroundColor Green
+  } catch {
+    Write-Host "Failed to import selection (bad JSON)." -ForegroundColor Red
+  }
+  Start-Sleep 1
+}
+
 function Print-PowerShell {
   $sel = Get-SelectedTweaks
   if (-not $sel) { Write-Host "Nothing selected." -ForegroundColor Yellow; Start-Sleep 1; return }
 
-  $lines = Get-SelectedCommandLines
-  $cmd = Build-PowerShellOneLiner $lines
+  $lines = @()
+  foreach ($t in $sel) {
+    foreach ($a in $t.Actions) {
+      if ($a.Kind -eq "Command") { $lines += $a.Command }
+    }
+  }
+  $cmd = "& { " + ($lines -join "; ") + " }"
 
   Print-Header
-  Write-Host "Copy/paste PowerShell (also copied to clipboard):" -ForegroundColor Cyan
+  Write-Host "Copy/paste PowerShell:" -ForegroundColor Cyan
   Write-Host ""
   Write-Host $cmd
   Write-Host ""
-  $copied = Try-SetClipboard $cmd
-  if ($copied) { Write-Host "✔ Copied to clipboard." -ForegroundColor Green } else { Write-Host "Clipboard copy not available." -ForegroundColor Yellow }
+  Try-SetClipboard $cmd | Out-Null
   Pause
 }
 
 function Print-Cmd {
   $sel = Get-SelectedTweaks
   if (-not $sel) { Write-Host "Nothing selected." -ForegroundColor Yellow; Start-Sleep 1; return }
-
-  $lines = Get-SelectedCommandLines
-  $ps = Build-PowerShellOneLiner $lines
-  $cmd = Build-CmdFromPs $ps
-
+  $cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Write-Host ''Use Apply inside LiteOptimizer for full output''"'
   Print-Header
-  Write-Host "Copy/paste CMD (also copied to clipboard):" -ForegroundColor Cyan
-  Write-Host ""
+  Write-Host "CMD:" -ForegroundColor Cyan
   Write-Host $cmd
-  Write-Host ""
-  $copied = Try-SetClipboard $cmd
-  if ($copied) { Write-Host "✔ Copied to clipboard." -ForegroundColor Green } else { Write-Host "Clipboard copy not available." -ForegroundColor Yellow }
+  Try-SetClipboard $cmd | Out-Null
   Pause
 }
 
@@ -989,7 +820,6 @@ while ($true) {
   elseif ($input -match '^\s*pa\s*$') { Select-Profile "Aggressive" }
   elseif ($input -match '^\s*gl\s*$') { Select-GamesPreset "Lite" }
   elseif ($input -match '^\s*gp\s*$') { Select-GamesPreset "Power" }
-  elseif ($input -match '^\s*gr\s*$') { Revert-LastGamesPreset }
   elseif ($input -match '^\s*t\s+(\d+)\s*$') {
     $n = [int]$Matches[1]
     if ($map.ContainsKey($n)) {
@@ -998,3 +828,6 @@ while ($true) {
     }
   }
 }
+
+Write-Host "`nExited LiteOptimizer." -ForegroundColor DarkGray
+Pause
