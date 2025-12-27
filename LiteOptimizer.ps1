@@ -86,6 +86,34 @@ function Load-State {
   }
 }
 
+function Create-LiteRestorePoint {
+  Ensure-Admin
+
+  try {
+    # Make sure System Restore is enabled (on C:). If it's already enabled, this doesn't hurt.
+    Enable-ComputerRestore -Drive "C:\" -ErrorAction SilentlyContinue | Out-Null
+
+    # Restore point frequency limit can block creating another one too soon; this bypasses it.
+    New-ItemProperty `
+      -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore" `
+      -Name "SystemRestorePointCreationFrequency" `
+      -PropertyType DWord `
+      -Value 0 `
+      -Force | Out-Null
+
+    Checkpoint-Computer -Description "LITERESTORE" -RestorePointType "MODIFY_SETTINGS" | Out-Null
+
+    Log "Created restore point: LITERESTORE"
+    Write-Host "✔ Restore point created: LITERESTORE" -ForegroundColor Green
+  } catch {
+    Write-Host "✖ Failed to create restore point: $($_.Exception.Message)" -ForegroundColor Red
+    Log "Restore point failed: $($_.Exception.Message)"
+  }
+
+  Start-Sleep 1
+}
+
+
 function Save-State($state) {
   ($state | ConvertTo-Json -Depth 10) | Set-Content -Path $StateFile -Encoding UTF8
 }
@@ -665,7 +693,10 @@ function Print-Menu {
   Write-Host "Commands:" -ForegroundColor Yellow
   Write-Host "  t <num>   Toggle"
   Write-Host "  ps/pb/pa  Profile: Safe / Balanced / Aggressive"
-  Write-Host "  gl/gp     Games Preset: Lite / Power"
+  Write-Host "  gl        Games Preset: Lite  (quick FPS boosts, safer)"
+  Write-Host "  gp        Games Preset: Power (more tweaks, higher impact/risk)"
+  Write-Host "  rp        Create Restore Point: LITERESTORE"
+  Write-Host "  a         Apply selected"
   Write-Host "  a         Apply selected"
   Write-Host "  undo      Undo selected (registry/services only; debloat not reversible)"
   Write-Host "  p         Print + COPY PowerShell command"
@@ -809,7 +840,46 @@ while ($true) {
 
   if ($input -match '^\s*q\s*$') { break }
   elseif ($input -match '^\s*r\s*$') { $selected.Clear() | Out-Null }
-  elseif ($input -match '^\s*a\s*$') { Apply-Selected }
+ function Apply-Selected {
+  Ensure-Admin
+  $sel = Get-SelectedTweaks
+  if (-not $sel) { Write-Host "Nothing selected." -ForegroundColor Yellow; Start-Sleep 1; return }
+
+  # Ask to create a restore point first
+  Write-Host ""
+  $ans = Read-Host "Create restore point 'LITERESTORE' before applying? (y/n)"
+  if ($ans -match '^\s*y\s*$') {
+    Create-LiteRestorePoint
+  } else {
+    Write-Host "Skipping restore point." -ForegroundColor DarkGray
+    Start-Sleep 0.5
+  }
+
+  Log "Applying: $($sel.Id -join ', ')"
+
+  foreach ($t in $sel) {
+    Write-Host "Applying: $($t.Name)" -ForegroundColor Cyan
+    foreach ($a in $t.Actions) {
+      try {
+        switch ($a.Kind) {
+          "Registry" { Apply-RegistryAction $a }
+          "Service"  { Apply-ServiceAction $a }
+          "Command"  { Apply-CommandAction $a }
+          "Debloat"  { Apply-DebloatAction $a }
+        }
+        Save-State $STATE
+      } catch {
+        Write-Host "  Failed: $($_.Exception.Message)" -ForegroundColor Red
+        Log "ERROR $($t.Id): $($_.Exception.Message)"
+      }
+    }
+  }
+
+  Write-Host "`nDone. Some changes may need restart/logoff." -ForegroundColor Green
+  Pause
+}
+
+  elseif ($input -match '^\s*rp\s*$') { Create-LiteRestorePoint }
   elseif ($input -match '^\s*undo\s*$') { Undo-Selected }
   elseif ($input -match '^\s*p\s*$') { Print-PowerShell }
   elseif ($input -match '^\s*c\s*$') { Print-Cmd }
