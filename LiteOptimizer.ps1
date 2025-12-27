@@ -14,6 +14,17 @@ Write-Host $logo -ForegroundColor Cyan
 Write-Host "Lite Optimizer starting..." -ForegroundColor Gray
 Start-Sleep -Seconds 1
 
+# Relaunch in a separate PowerShell window (keeps it "app-like")
+if (-not $env:LITEOPT_CHILD) {
+  $env:LITEOPT_CHILD = "1"
+  Start-Process powershell.exe -ArgumentList @(
+    "-NoProfile",
+    "-ExecutionPolicy","Bypass",
+    "-Command", "& { iwr -useb 'https://raw.githubusercontent.com/mariman2034-collab/LiteOptimizer/master/LiteOptimizer.ps1' | iex }"
+  ) -WindowStyle Normal
+  exit
+}
+
 
 # LiteOptimizer.ps1
 # console menu with:
