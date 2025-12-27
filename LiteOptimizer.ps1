@@ -16,13 +16,29 @@ Start-Sleep -Seconds 1
 # Relaunch in a separate PowerShell window (keeps it "app-like")
 if (-not $env:LITEOPT_CHILD) {
   $env:LITEOPT_CHILD = "1"
+
+  # Re-download to ProgramData so we can run as a file (more reliable than iex in child)
+  $local = Join-Path $env:ProgramData "LiteOptimizer\LiteOptimizer.ps1"
+  New-Item -ItemType Directory -Path (Split-Path $local) -Force | Out-Null
+
+  try {
+    iwr -useb "https://raw.githubusercontent.com/mariman2034-collab/LiteOptimizer/master/LiteOptimizer.ps1" | Set-Content -Path $local -Encoding UTF8
+  } catch {
+    Write-Host "Download failed: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Press Enter to exit..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+    exit
+  }
+
   Start-Process powershell.exe -ArgumentList @(
     "-NoProfile",
     "-ExecutionPolicy","Bypass",
-    "-Command", "& { iwr -useb 'https://raw.githubusercontent.com/mariman2034-collab/LiteOptimizer/master/LiteOptimizer.ps1' | iex }"
+    "-File", $local
   ) -WindowStyle Normal
+
   exit
 }
+
 
 # LiteOptimizer.ps1
 # console menu with:
